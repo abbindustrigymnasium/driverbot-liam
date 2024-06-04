@@ -7,31 +7,25 @@
 #define WIFI_TIMEOUT 1000
 #define LOOP_TIMEOUT 0
 
-#include <ESP8266WiFi.h>
-#include <PubSubClient.h>
+WiFiClient wifiClient; // Skapar en instans av WiFi-klienten
+Servo myServo; // Skapar en instans av Servo-motorn
+PubSubClient mqttClient(wifiClient); // Skapar en instans av MQTT-klienten med WiFi-klienten
 
-#include "MQTTConnector.h"
-#include "Credentials.h"
-#define motorSpeedPin 5 
-#define motorDirPin 0
-WiFiClient wifiClient;
-Servo myServo;
-PubSubClient mqttClient(wifiClient);
+boolean mqttInitCompleted = false; // En flagga som indikerar om MQTT-initiering är klar
+String clientId = "IoTPractice-" + String(ESP.getChipId()); // Unikt klient-ID baserat på ESP-chippet
 
-boolean mqttInitCompleted = false;
-String clientId = "IoTPractice-" + String(ESP.getChipId());
-
-/* Incoming data callback. */
+/* Callback-funktion för inkommande data från MQTT-broker. */
 void dataCallback(char* topic, byte* payload, unsigned int length)
 {
   char payloadStr[length + 1];
   memset(payloadStr, 0, length + 1);
   strncpy(payloadStr, (char*)payload, length);
-  Serial.printf("Data    : dataCallback. Topic : [%s]\n", topic);
-  Serial.printf("Data    : dataCallback. Payload : %s\n", payloadStr);
+  Serial.printf("Data    : dataCallback. Ämne: [%s]\n", topic);
+  Serial.printf("Data    : dataCallback. Innehåll: %s\n", payloadStr);
   
+  // Kontrollera vilket ämne meddelandet kommer ifrån och utför rätt kodblock.
   if (strcmp(topic, TOPIC) == 0) {
-    // Motor control logic (unchanged)
+    // Logik för motorstyrning
     int motorSpeed;
     if (strcmp(payloadStr, "Fram") == 0) {
       motorSpeed = 512;
@@ -43,50 +37,55 @@ void dataCallback(char* topic, byte* payload, unsigned int length)
       motorSpeed = 0;
     }
     analogWrite(motorSpeedPin, motorSpeed);
-    Serial.print("Motor speed set to ");
+    Serial.print("Motorhastighet inställd på ");
     Serial.print(motorSpeed);
     Serial.println(" PWM.");
   } else if (strcmp(topic, TOPIC2) == 0) {
-    // Servo control logic
+
+
+    // Logik för servostyrning
     if (strcmp(payloadStr, "Höger") == 0) {
-      // Turn left 45 degrees
+      // Sväng vänster 45 grader
       int newAngle = myServo.read() - 90;
-      if (newAngle < 0) newAngle = 0; // Ensure angle doesn't go below 0
+      if (newAngle < 0) newAngle = 0; // Se till att vinkeln inte går under 0
       myServo.write(newAngle);
-      Serial.println("Servo turned 45 degrees left.");
+      Serial.println("Servo svängde 45 grader åt vänster.");
     } else if (strcmp(payloadStr, "Vänster") == 0) {
-      // Turn right 45 degrees
+      // Sväng höger 45 grader
       int newAngle = myServo.read() + 90;
-      if (newAngle > 180) newAngle = 180; // Ensure angle doesn't exceed 180
+      if (newAngle > 180) newAngle = 180; // Se till att vinkeln inte överstiger 180
       myServo.write(newAngle);
-      Serial.println("Servo turned 45 degrees right.");
+      Serial.println("Servo svängde 45 grader åt höger.");
     }
   }
 }
 
+// Funktion för att utföra anslutning till MQTT-broker
 void performConnect()
 {
   uint16_t connectionDelay = 5000;
   while (!mqttClient.connected())
   {
-    Serial.printf("Trace   : Attempting MQTT connection...\n");
+    Serial.printf("Spår    : Försöker ansluta till MQTT...\n");
     if (mqttClient.connect(clientId.c_str(), MQTT_USERNAME, MQTT_KEY))
     {
-      Serial.printf("Trace   : Connected to Broker.\n");
+      Serial.printf("Spår    : Ansluten till Mäklare.\n");
 
-      /* Subscription to your topic after connection was succeeded.*/
+      // Prenumeration på ämnen efter lyckad anslutning
       MQTTSubscribe(TOPIC);
       MQTTSubscribe(TOPIC2);
     }
     else
     {
-      Serial.printf("Error!  : MQTT Connect failed, rc = %d\n", mqttClient.state());
-      Serial.printf("Trace   : Trying again in %d msec.\n", connectionDelay);
+      Serial.printf("Fel!    : MQTT-anslutning misslyckades, rc = %d\n", mqttClient.state());
+      Serial.printf("Spår    : Försöker igen om %d ms.\n", connectionDelay);
       delay(connectionDelay);
     }
   }
 }
 
+// Funktion för att prenumerera på ett ämne
+// retval = returnvalue
 boolean MQTTSubscribe(const char* topicToSubscribe)
 {
   boolean retval = false;
@@ -97,11 +96,13 @@ boolean MQTTSubscribe(const char* topicToSubscribe)
   return retval;
 }
 
+// Funktion för att kontrollera om MQTT-klienten är ansluten
 boolean MQTTIsConnected()
 {
   return mqttClient.connected();
 }
 
+// Funktion för att initiera MQTT-klienten och ange server och callback-funktion
 void MQTTBegin()
 {
   mqttClient.setServer(MQTT_BROKER, MQTT_BROKER_PORT);
@@ -109,6 +110,7 @@ void MQTTBegin()
   mqttInitCompleted = true;
 }
 
+// Funktion för att hantera MQTT-loopen
 void MQTTLoop()
 {
   if(mqttInitCompleted)
@@ -121,41 +123,42 @@ void MQTTLoop()
   }
 }
 
+// Funktion för att initiera WiFi-anslutning
 void WiFiBegin(const char* ssid, const char* pass)
 {
   WiFi.begin(ssid, pass);
-  Serial.printf("Waiting for AP connection ...\n");
+  Serial.printf("Väntar på AP-anslutning ...\n");
   while(WiFi.status() != WL_CONNECTED)
   {
     delay(WIFI_TIMEOUT);
     Serial.printf(".");
   }
   IPAddress ip = WiFi.localIP();
-  Serial.printf("\nConnected to AP. IP : %d.%d.%d.%d\n", 
+  Serial.printf("\nAnsluten till AP. IP : %d.%d.%d.%d\n", 
     ip[0],ip[1],ip[2],ip[3]);
 }
 
-
+// Funktion för att återansluta till MQTT-broker
 void reconnect() {
   while (!mqttClient.connected()) {
-    Serial.println("Attempting MQTT connection...");
+    Serial.println("Försöker ansluta till MQTT...");
     if (mqttClient.connect("ESP8266Client", MQTT_USERNAME, MQTT_KEY)) {
-      //Om allt går rätt, subscribea till båda topics
-      Serial.println("MQTT connected");
+      // Om allt går rätt, prenumerera på båda ämnena
+      Serial.println("MQTT ansluten");
       mqttClient.subscribe(TOPIC2, 0);
       mqttClient.subscribe(TOPIC, 0);
       break;
     } else {
-      Serial.print("Failed to connect to MQTT, rc=");
+      Serial.print("Misslyckades med att ansluta till MQTT, rc=");
       Serial.print(mqttClient.state());
-      Serial.println(" Retrying in 5 seconds...");
+      Serial.println(" Försöker igen om 5 sekunder...");
       delay(5000);
       break; 
     }
   }
 }
 
-
+// Setup-funktion för att initiera komponenter och anslutningar och ge ström
 void setup() 
 {
   pinMode(motorSpeedPin, OUTPUT);
@@ -163,13 +166,14 @@ void setup()
   Serial.begin(9600);
   Serial.setDebugOutput(true);
   
-  // Initialize the servo
-  myServo.attach(D4); // Replace SERVO_PIN with the pin number to which the servo is connected
+  // Initiera servon
+  myServo.attach(D4); // Ersätt SERVO_PIN med det pinnummer som servon är ansluten till
 
   WiFiBegin(STA_SSID, STA_PASS);
   MQTTBegin();
 }
 
+// Loop-funktion för att upprepa MQTT-loop
 void loop() 
 {
   MQTTLoop();
